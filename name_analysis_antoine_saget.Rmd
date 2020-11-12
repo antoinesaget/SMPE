@@ -1,0 +1,357 @@
+---
+output:
+  pdf_document: 
+    extra_dependencies: ["flafter"]
+urlcolor: blue
+title: "French given names per year per department analysis"
+author: "Antoine Saget"
+date: "November, 2020"  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T, collapse = TRUE, tidy=TRUE, tidy.opts=list(arrow=TRUE, indent=2, width.cutoff=40), fig.height=3, fig.pos = 'H')
+```
+
+# 1 - The data
+
+```{r, include=FALSE}
+library(kableExtra)
+library(printr)
+library(tidyverse)
+library(dplyr)      
+```
+
+```{r, include=FALSE}
+file = "dpt2019_txt.zip"
+if(!file.exists(file)){
+  download.file("https://www.insee.fr/fr/statistiques/fichier/2540004/dpt2019_csv.zip",
+	destfile=file)
+}
+unzip(file)
+```
+
+## 1.1 - Building the Dataframe from the file
+
+According to the Dataset's dictionary of variables found [here](https://www.insee.fr/fr/statistiques/2540004?sommaire=4767262#dictionnaire) (tab "DICTIONNAIRE DES VARIABLES"), the dataset is composed of the following columns : 
+
+|         | SEXE | PREUSUEL | ANNAIS | DPT | NOMBRE |
+|-:       |------|----------|--------|-----|--------|
+|Type     | Character | Character | Character|Character| Numerical |
+| Details | `1` for male, `2` for female | 25 Chars or less | 4 Chars, from 1900 to 2019 or `XXXX` | 3 Chars, department or `XX` | Up to 8 digits |
+
+After looking into the documentation found [here](https://www.insee.fr/fr/statistiques/2540004?sommaire=4767262#documentation) (tab "DOCUMENTATION") we understand that row with `ANNAIS = XXXX` or `DPT = XX` corresponds to a name given at least 20 times over a given period, but less than 3 times for a given year. We decide to discard them. 
+We also decide to consider `ANNAIS`, `DPT` and `SEXE` as integers in order to restrict our parsing as much as possible and detect/discard potential error lines that doesn't respect the `integer;character;integer;integer;integer` format.
+
+```{r message=FALSE}
+FirstNames <- read_delim("dpt2019.csv",delim=";", col_types = "iciii");
+```
+
+We have 72890 parsing failures. We make sure every error come from either an `XXXX` year or an `XX` department : 
+
+```{r}
+parsing_failures <- problems(FirstNames)
+parsing_failures_notX <- parsing_failures[parsing_failures$actual != "XXXX" & parsing_failures$actual != "XX",]
+print(paste("Number of parsing failures different from an XXXX year or an XX department :", nrow(parsing_failures_notX)))
+```
+0 parsing failures different from the expected one. Let's remove the failures from the Dataframe : 
+
+```{r}
+print(paste("Number of row before removing failures :", nrow(FirstNames)))
+print(paste("Expected number of rows after removing failure :", nrow(FirstNames)-nrow(parsing_failures)/2.0))
+FirstNames <- FirstNames[-parsing_failures$row,]
+print(paste("Number of row after removing failures :", nrow(FirstNames)))
+```
+
+Our Dataframe is now ready for analysis.
+
+## 1.2 - Exploring the Dataframe
+
+Before analyzing in depth, let's take an overview of the data.
+
+```{r, echo=F}
+kbl(summary(FirstNames), booktabs = T, 
+    col.names = c("Gender", "First name", "Birth year", "Department", "Number"), 
+    caption = "Summary of the FirstNames Dataframe.") %>% kable_styling(position = "center") 
+```
+
+The summary in Table 2 doesn't give much interesting results. We can still note that the gender mean is at 1.536, meaning that there are slightly more female rows than male (doesn't mean more female than male, just the number of row). Also we can see that for a given department, one year, 6316 people where born given the same name !
+
+```{r, echo=F}
+kbl(FirstNames[FirstNames$nombre == 6316,], booktabs = T, 
+    col.names = c("Gender", "First name", "Birth year", "Department", "Number"), 
+    caption = "Most attributed name in one year in one department.") %>% kable_styling(position = "center")
+```
+
+6316 Jean are born in 1946 in Paris (Table 3) !  
+Some general stats of the Dataset : 
+
+```{r,  echo=F}                        
+UniqueFirstNames <- FirstNames %>% distinct(preusuel, sexe)
+UniqueMaleFirstNames <- UniqueFirstNames[UniqueFirstNames$sexe == 1,]
+UniqueFemaleFirstNames <- UniqueFirstNames[UniqueFirstNames$sexe == 2,]
+
+print(paste("Number of rows in the Dataframe : ", nrow(FirstNames)))
+print(paste("Number of males identified : ", sum(FirstNames[FirstNames$sexe == 1,]$nombre)))
+print(paste("Number of females identified : ", sum(FirstNames[FirstNames$sexe == 2,]$nombre)))
+print(paste("Number of different first names : ", nrow(UniqueFirstNames)))
+```
+We can see that even with slightly more females row, there are fewer (37926398) females identified than males (39486980).
+
+Some male first names :
+```{r, echo=F}
+sample_n(UniqueMaleFirstNames, 10)$preusuel
+```
+Some female first names :
+```{r, echo=F}
+sample_n(UniqueFemaleFirstNames, 10)$preusuel
+```
+
+# 2 - First name frequency analysis
+## 2.1 - Bruno
+
+Let's analyze the frequency of the first name **Bruno**. First, we look at names close to Bruno (names containing BRUN) (Table below, _lost too much time trying to reference it / place it at the right position / caption it, but without success... still learning._).
+
+```{r, echo = F, tab.cap="First names containing `BRUN`", out.extra=''}
+brunoDerivative <- UniqueFirstNames %>% filter(grepl('BRUN', preusuel))
+kbl(list(brunoDerivative[brunoDerivative$sexe == 1,], brunoDerivative[brunoDerivative$sexe == 2,]), booktabs = T, col.names = c("Gender", "First name"))
+```
+We can see that Bruno is sometimes used for females, also Bruneau exist. 
+Let's check how many female Bruno have been identified :
+
+```{r echo=FALSE}
+nBrunoByGender <- FirstNames %>% group_by(preusuel, sexe) %>% filter(preusuel == "BRUNO") %>% count(wt=nombre)
+nBrunoMale = nBrunoByGender[nBrunoByGender$sexe == 1,]$n
+nBrunoFemale = nBrunoByGender[nBrunoByGender$sexe == 2,]$n
+
+print(paste("Number of female given the name Bruno : ", nBrunoFemale))
+print(paste("Number of male given the name Bruno : ", nBrunoMale))
+print(paste("Percentage of Bruno females compared to male : ", nBrunoFemale*100.0/nBrunoMale))
+```
+The females named Bruno represents less than 0.03% of the identified people named Bruno.
+In the following we will focus only on the first name spelled `Bruno` and given to male.
+
+Let's see the evolution of the frequency of parents giving their male child name `Bruno`. The frequency is important here because the number of given name (number of births) per year is not constant from one year to the other. Also, as we are looking at the male attribution of the name, it make sense to look at the frequency of attribution of the name within male attributions only. Indeed, if for a given year much more female are born (this shouldn't happen, but still), then the number of people given the name Bruno might reduce even if the frequency of attribution of the name Bruno to male child is still the same.
+
+```{r message=FALSE, include=FALSE}
+MaleNamesFrequencies <- FirstNames %>% filter(sexe == 1) %>% group_by(annais, preusuel) %>% summarise(n = sum(nombre)) %>% mutate(freq = n / sum(n))
+MaleBrunoFrequency <- MaleNamesFrequencies[MaleNamesFrequencies$preusuel == "BRUNO",]
+head(MaleBrunoFrequency)
+```
+
+```{r, echo=F, fig.height=2}
+yearMaxMaleFreqBruno <- MaleBrunoFrequency[MaleBrunoFrequency$freq == max(MaleBrunoFrequency$freq),]
+yearMaxMaleCountBruno <- MaleBrunoFrequency[MaleBrunoFrequency$n == max(MaleBrunoFrequency$n),]
+
+ggplot(MaleBrunoFrequency, aes(x = annais, y = freq)) + 
+    theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "Birth year", y = "Frequency", title = "Frequency of attribution of the name Bruno to male child over time.") +
+    scale_x_continuous(breaks = c(seq(1900, 2019, by=10), yearMaxMaleFreqBruno$annais)) + scale_y_continuous(breaks = scales::pretty_breaks(n = 10))+ 
+    geom_line() + geom_vline(xintercept=yearMaxMaleFreqBruno$annais, colour="chartreuse3", linetype="longdash") +
+    theme(panel.grid.minor = element_blank())
+```
+```{r, echo=F}
+print(paste("The named Brunos was attributed the most times to male child (",yearMaxMaleCountBruno$n,") in", yearMaxMaleCountBruno$annais))
+print(paste("and with the highest frequency (",yearMaxMaleFreqBruno$freq,") in", yearMaxMaleFreqBruno$annais))
+```
+The frequency of the attribution of the name Bruno to male child increase from 1900 to 1963 with a peak of 12738 attributions (almost 3% of the attributed male name) in 1963 and decrease from this point. It seems that the name follow a kind of "trend pattern" where the name is more and more used until it's used too much and replaced by probably another trendy name at that time.
+
+## 2.2 - Bruno compared to other first names
+
+With the "trend" hypothesis in mind, let's look at the evolution of the attribution of the name Kevin which was (in our opinion) very trendy in the 2000's.
+
+```{r, echo=F, fig.height=2}
+MaleKevinFrequency <- MaleNamesFrequencies[MaleNamesFrequencies$preusuel == "KEVIN",]
+yearMaxMaleFreqKevin <- MaleKevinFrequency[MaleKevinFrequency$freq == max(MaleKevinFrequency$freq),]
+
+ggplot(MaleKevinFrequency, aes(x = annais, y = freq)) + 
+    geom_line() +
+    theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank()) +
+    labs(x = "Birth year", y = "Frequency", title = "Frequency of attribution of the name Kevin to male child over time.") +
+    scale_x_continuous(breaks = c(seq(1900, 2019, by=5), yearMaxMaleFreqKevin$annais)) + scale_y_continuous(breaks = scales::pretty_breaks(n = 10)) + 
+    geom_vline(xintercept=yearMaxMaleFreqKevin$annais, colour="chartreuse3", linetype="longdash")
+```
+As we can see, Kevin follow the same evolution of Bruno but much later. Indeed, Kevin has never been attributed - enough time to be registered by the Insee - before 1955 and peak only in 1991.
+
+Now let's compare several first names frequencies : 
+
+```{r, echo=F}
+chosenNames = c("GABRIEL", "ANTOINE", "LUCIEN", "BRUNO")
+selectedFrequencies <- MaleNamesFrequencies %>% filter(preusuel %in% chosenNames)
+
+ggplot(selectedFrequencies, aes(x = annais, y = freq, color=preusuel)) + 
+    geom_line() + labs(color='First name') + 
+    theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "Birth year", y = "Frequency", title = "Frequency of attribution of the various first names to male child over time.") +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 10))  + scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+Some name like Lucien were often attributed in the past but are old-fashioned now. Others, like Gabriel or Antoine were quite used in the past, decreased in popularity and became trendy again in the 2000's.
+
+We've seen earlier that more than 15000 unique names where identified in the dataset but we can't come up with that many name ideas, so let's compare Bruno against random names and see if we find interesting results.
+
+```{r eval=FALSE, include=FALSE}
+chosenNames = sample_n(UniqueFirstNames[UniqueFirstNames$sexe == 1,], 10)$preusuel
+selectedFrequencies <- MaleNamesFrequencies %>% filter(preusuel %in% chosenNames)
+
+ggplot(selectedFrequencies, aes(x = annais, y = freq, color=preusuel)) + 
+    geom_line() + labs(color='First name') + 
+    theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "Birth year", y = "Frequency", title = "Frequency of attribution of the various first names to male child over time.") +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 20))  + scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+We often have very rare names leading to result that are difficult to interpret so we'll only take random names that are relatively frequent.
+
+```{r, message=FALSE, echo=F}
+set.seed(4)
+
+frequentMaleNames <- MaleNamesFrequencies %>% group_by(preusuel) %>% summarize(avg = mean(freq)) %>% filter(avg > 0.005)
+chosenNames = c(sample_n(frequentMaleNames, 4)$preusuel, "BRUNO")
+selectedFrequencies <- MaleNamesFrequencies %>% filter(preusuel %in% chosenNames)
+
+ggplot(selectedFrequencies, aes(x = annais, y = freq, color=preusuel)) + 
+    geom_line() + labs(color='First name') + 
+    theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(x = "Birth year", y = "Frequency", title = "Frequency of attribution of the various first names to male child over time.") +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 10))  + scale_y_continuous(breaks = scales::pretty_breaks(n = 10))
+```
+
+We can see here that Albert was more popular than Bruno in the past and that Mathéo is a very recent name that is already decreasing in popularity.
+
+## 2.3 - Further experiments
+
+From the past experiments it's seems to us that first names are more varied today than in the past, let's check this hypothesis by plotting the number of unique name attributed per year :
+
+```{r, echo=F, fig.height=2}
+uniqueNamesPerYear <- FirstNames %>% distinct(preusuel, annais) %>% group_by(annais) %>% count()
+
+ggplot(uniqueNamesPerYear, aes(x = annais, y = n)) +
+  geom_line() + 
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Birth year", y = "Number of unique name", title = "Evolution of the variaty of names over time.") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10))  + scale_y_continuous(breaks = scales::pretty_breaks(n = 6)) +
+  theme(panel.grid.minor = element_blank())
+```
+> Note that the evolution of the number of births per year in France since 1900 is quite steady (even decreasing a little), so "more varied names" cannot be explained by "more babies".
+
+We only looked at male first names so far. Let's look at the evolution of the distribution of a genderless names over time. 
+
+```{r, echo=F, message=F, warning=F, fig.height=3.5}
+genderRatios <- FirstNames %>% filter(preusuel != "_PRENOMS_RARES") %>% group_by(annais, preusuel, sexe) %>% count(wt=nombre) %>% spread(sexe, n) %>% filter(!is.na(`1`) & !is.na(`2`)) %>% mutate(ratio = `1`/(`1` + `2`))
+
+chosenNames = c("CAMILLE", "CHARLIE", "DOMINIQUE", "ALIX")
+selectedGenderlessNames <- genderRatios %>% filter(preusuel %in% chosenNames)
+
+ggplot(selectedGenderlessNames, aes(x = annais, y = ratio, colour = ratio > 0.5)) +
+  scale_color_manual(name="Most used gender for the name", values = setNames(c('#EE5A45','#1E8F89'),c(T, F)), labels=c('Female','Male')) + 
+  geom_point(size=0.5) + ylim(0, 1) + geom_hline(yintercept = 0.5) + 
+  facet_grid(preusuel ~ .) +
+  theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1), strip.text.y = element_text(size = 6)) +
+  labs(x = "Birth year", y = "Gender repartition of names \n(only male = 1, only female = 0)", title = "Evolution of the gender repartition of genderless names over time.") +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + scale_y_continuous(breaks = scales::pretty_breaks(n = 3))
+```
+
+We can see for example that Alix is mostly used as a female name with exception for the 1930-1970 period. Dominique on the other hand is mostly used as male name. An interesting shift happened to Camille that was mostly used as a male name before 1965 and is mostly used as a female name since.
+
+# 3 - Most given firstname by year
+
+```{r, include = F}
+# Found online to squish scale at a given interval (bad trick to make plot more readable)
+library(scales)
+squish_trans <- function(from, to, factor) {
+  
+  trans <- function(x) {
+    
+    if (any(is.na(x))) return(x)
+
+    # get indices for the relevant regions
+    isq <- x > from & x < to
+    ito <- x >= to
+    
+    # apply transformation
+    x[isq] <- from + (x[isq] - from)/factor
+    x[ito] <- from + (to - from)/factor + (x[ito] - to)
+    
+    return(x)
+  }
+
+  inv <- function(x) {
+    
+    if (any(is.na(x))) return(x)
+
+    # get indices for the relevant regions
+    isq <- x > from & x < from + (to - from)/factor
+    ito <- x >= from + (to - from)/factor
+    
+    # apply transformation
+    x[isq] <- from + (x[isq] - from) * factor
+    x[ito] <- to + (x[ito] - (from + (to - from)/factor))
+    
+    return(x)
+  }
+  
+  # return the transformation
+  return(trans_new("squished", trans, inv))
+}
+```
+
+```{r, message = F, echo=F, fig.height = 2}
+# The code here is particularly messy and need cleaning (a lot of experiment went into making the final results, leading to spaghetti code)
+MostGivenFirstNames <- FirstNames %>% filter(preusuel != "_PRENOMS_RARES") %>% group_by(annais, sexe, preusuel) %>% count(wt = nombre) %>% group_by(sexe, annais) %>% mutate(n = n / sum(n)) %>% slice(which.max(n))
+
+MostGivenFirstNamesFormated <- MostGivenFirstNames %>% group_by(sexe, preusuel) %>% summarise(debut = min(annais), fin = max(annais), y = mean(n))
+
+
+my_transMale <- squish_trans(1900, 1958, 4) # This code is bad as it's "handmade" but it's meant to squish JEAN that takes to much space on the graph
+my_transFemale <- squish_trans(1900, 1955, 6)
+
+ggplot(MostGivenFirstNames[MostGivenFirstNames$sexe == 1,]) +
+  geom_point(aes(x=annais, y=n, color=preusuel), size = 1) +
+  scale_x_continuous(limits=c(1900, 2019), breaks= c(MostGivenFirstNamesFormated[MostGivenFirstNamesFormated$sexe == 1,]$debut), trans=my_transMale)+
+  theme_bw() + theme(panel.grid.minor = element_blank()) +
+  theme(aspect.ratio = .2, legend.position="none", axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) + 
+  geom_text(data=MostGivenFirstNamesFormated[MostGivenFirstNamesFormated$sexe == 1,], aes(x=debut, y=0.09, label = preusuel, angle=45, hjust=0, colour=preusuel), size = 2.5) + 
+  labs(x = "Year", y = "Frequency of the name", title = "Most frequent male name over time.")
+
+ggplot(MostGivenFirstNames[MostGivenFirstNames$sexe == 2,]) +
+  geom_point(aes(x=annais, y=n, color=preusuel), size = 1) +
+  scale_x_continuous(limits=c(1900, 2019), breaks= c(MostGivenFirstNamesFormated[MostGivenFirstNamesFormated$sexe == 2,]$debut), trans=my_transFemale)+
+  theme_bw() + theme(panel.grid.minor = element_blank(), aspect.ratio = .2, legend.position="none", axis.text.x = element_text(angle = 45, hjust = 1, size = 6)) + 
+  geom_text(data=MostGivenFirstNamesFormated[MostGivenFirstNamesFormated$sexe == 2,], aes(hjust=0, x=debut, y=0.1, label = preusuel, angle=60,   colour=preusuel), size = 2) + 
+  labs(x = "Year", y = "Frequency of the name", title = "Most frequent female name over time.")
+```
+We can see that for both males and females the number of occurences of the most frequent name decrease over time, this make sense because of the increase of the variety of names we demonstrated earlier.
+
+Now let's see the frequency of the most frequent name with no regards to it's gender.
+
+```{r, echo=F, fig.height=2}
+MostFrequentName <- FirstNames %>% group_by(annais, preusuel) %>% count(wt = nombre) %>% group_by(annais) %>% mutate(freq = n / sum(n)) %>% group_by(preusuel) %>% mutate(avgFreq = mean(freq)) %>% group_by(annais) %>% filter(avgFreq == max(avgFreq))
+
+ggplot(MostFrequentName, aes(x = annais, y = freq, colour=preusuel)) + 
+    geom_line() +
+    scale_color_discrete(name="First name") + 
+    theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.minor = element_blank()) +
+    labs(x = "Birth year", y = "Frequency", title = "Frequency of attribution of the most frequent name over time.") +
+    scale_x_continuous(breaks = scales::pretty_breaks(n = 10)) + scale_y_continuous(breaks = scales::pretty_breaks(n = 5)) + 
+    geom_vline(xintercept=MostFrequentName[MostFrequentName$freq == max(MostFrequentName$freq),]$annais, colour="chartreuse3", linetype="longdash")
+```
+```{r, echo=F}
+print(paste("Number of Marie born since 1900 :", sum(MostFrequentName$n)))
+```
+With 2256131 attributions since 1900 and more than 12% of attributions in 1900, Marie is the overall most frequent name given to children since 1900 in France.
+
+# 4 - Variety of name
+
+```{r, message = F, echo=F}
+mostVariedDepartmentOverTime <- FirstNames %>% filter(preusuel != "_PRENOMS_RARES") %>% group_by(annais) %>% distinct(preusuel, dpt) %>% group_by(annais, dpt) %>% count() %>% group_by(annais) %>% filter(n == max(n))
+
+ggplot(mostVariedDepartmentOverTime) +
+  geom_point(aes(x=annais, y=n, color=factor(dpt)), size = 1) +
+  scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+  theme_bw() + theme(panel.grid.minor = element_blank(), legend.position="bottom", aspect.ratio = .2, axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Year", y = "Number of unique names", title = "Evolution of the department with the most variety of names.") +
+  scale_color_discrete(name="Department number")
+```
+The most varied department is Paris. This make sense as Paris concentrate a lot of population and a very diverse population as well (potentially more unique names when mixings origins). 
+
+We can see that from 1939 to 1945, Guadeloupe is the most diverse department, the same situation happens in 1914-1918 and this time Martinique is the most varied department. This can be explained in two ways. Firstly, both periods where time of war during which the birth rate significantly dropped, less babies mean less chance of varied names. Secondly, as this was time of war, it's possible that there is a lot of missing data during this period. So, Martinique and Guadeloupe didn't suddenly become more diverse, it's just that variety decreased in mainland France during those period as a result of the birth rate decreasing (and/or missing data because of the wars). 
